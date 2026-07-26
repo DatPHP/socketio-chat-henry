@@ -1,0 +1,70 @@
+# .github/workflows/server-ci.yml
+# Workflow này chạy MỖI KHI có push hoặc Pull Request nhắm vào nhánh main,
+# và CHỈ chạy khi có thay đổi trong thư mục server/ (tránh chạy test server
+# thừa thãi khi bạn chỉ sửa code ở client/).
+
+name: Server CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**" # chỉ trigger khi có file trong server/ thay đổi
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest # máy ảo Linux do GitHub cung cấp miễn phí để chạy job
+
+    # Dịch vụ phụ trợ cần cho test — GitHub Actions cho phép khai báo
+    # sẵn 1 container Redis tạm thời, chỉ sống trong lúc job này chạy.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: ./server # mọi lệnh bên dưới đều chạy TRONG thư mục server
+
+    steps:
+      # Bước 1: tải code về máy ảo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Bước 2: cài Node.js đúng version bạn đang dùng
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      # Bước 3: cài dependencies
+      - name: Install dependencies
+        run: npm ci # "ci" thay vì "install" -- cài ĐÚNG version ghi trong
+                     # package-lock.json, không cho phép version trôi nổi,
+                     # phù hợp cho môi trường CI (cần kết quả nhất quán)
+
+      # Bước 4: generate Prisma Client (bắt buộc trước khi TypeScript
+      # compile được, vì code import types từ @prisma/client)
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      # Bước 5: chạy unit test — CHÚ Ý: đây là test đã MOCK Prisma
+      # (Giai đoạn 8), nên KHÔNG cần kết nối Postgres thật ở bước này.
+      - name: Run tests
+        run: npm test
+
+      # Bước 6: kiểm tra code compile được (không lỗi TypeScript)
+      - name: Type check & build
+        run: npm run build
