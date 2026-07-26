@@ -1,7 +1,7 @@
 // src/lib/useRoomSocket.ts
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { socket } from "@/lib/socket";
 import { MessageItem } from "@/lib/api";
 
