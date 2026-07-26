@@ -1,0 +1,92 @@
+// prisma/schema.prisma
+// Đây là "bản thiết kế" database. Prisma sẽ đọc file này để:
+// 1. Sinh ra Prisma Client (code TypeScript để query DB)
+// 2. Tạo migration (SQL thật) để tạo bảng trên Postgres
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // dùng khi app chạy (pooled connection)
+  directUrl = env("DIRECT_URL")   // dùng khi chạy migrate (direct connection)
+}
+
+// ==========================
+// USER
+// ==========================
+model User {
+  id        String   @id @default(cuid())
+  // cuid() sinh ra chuỗi ID duy nhất, không đoán được thứ tự (an toàn hơn số tự tăng)
+
+  name      String
+  email     String
+
+  // Phòng mà user đang tham gia hiện tại (null = không ở trong phòng nào)
+  // Đây chính là cách ta biểu diễn "join_in_room_id" và "exit_room" bạn đề cập:
+  // - join room  -> set currentRoomId = <room.id>
+  // - exit room  -> set currentRoomId = null
+  currentRoomId String?
+  currentRoom   Room?   @relation(fields: [currentRoomId], references: [id])
+
+  messages  Message[] // 1 user có thể gửi nhiều message
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([currentRoomId]) // tăng tốc query "ai đang ở phòng này"
+}
+
+// ==========================
+// ROOM
+// ==========================
+model Room {
+  id        String   @id @default(cuid()) // khóa chính nội bộ
+  code      String   @unique              // mã 6 ký tự công khai, vd "J6gsak"
+  name      String                        // tên hiển thị, vd "Tán Ngẫu"
+
+  users     User[]    // danh sách user đang currentRoom = phòng này (quan hệ ngược)
+  messages  Message[] // toàn bộ message thuộc phòng này
+
+  createdAt DateTime @default(now())
+}
+
+// ==========================
+// MESSAGE
+// ==========================
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  // Đây chính là "thời gian gửi message" hiển thị trên UI
+
+  @@index([roomId, createdAt]) // tăng tốc query "lấy lịch sử message của 1 phòng, sắp theo thời gian"
+}
+
+// ==========================
+// ACTIVITY LOG
+// ==========================
+// Bảng lưu lịch sử hoạt động (join/leave) của user trong các phòng.
+// Đây KHÔNG phải dữ liệu cần hiển thị real-time cho user — chỉ dùng
+// cho việc thống kê/audit sau này -> đúng loại việc nên xử lý qua queue.
+model ActivityLog {
+  id        String   @id @default(cuid())
+
+  roomCode  String   // lưu code thay vì roomId để đơn giản, không cần join
+  userId    String
+  userName  String   // lưu kèm tên tại thời điểm đó (tránh phải join User sau này)
+
+  action    String   // "join" hoặc "leave"
+
+  createdAt DateTime @default(now())
+
+  @@index([roomCode, createdAt])
+}
